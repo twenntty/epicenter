@@ -2,7 +2,8 @@ import os
 import telebot
 from telebot import types
 import sqlite3
-from flask import Flask
+from flask import Flask, request
+import threading
 
 # Настройки
 TOKEN = '7253772078:AAGI3pDm0Wc9CL3cIPCWTDpbqcmMnO7qV30'
@@ -42,6 +43,19 @@ app = Flask(__name__)
 def webhook():
     return "Telegram Bot is running!"
 
+@app.route(f'/{TOKEN}', methods=['POST'])
+def get_message():
+    json_str = request.get_data().decode('UTF-8')
+    update = telebot.types.Update.de_json(json_str)
+    bot.process_new_updates([update])
+    return 'OK', 200
+
+# Устанавливаем вебхук
+def set_webhook():
+    webhook_url = f'https://{os.environ["RENDER_EXTERNAL_URL"]}/{TOKEN}'
+    bot.remove_webhook()
+    bot.set_webhook(url=webhook_url)
+
 # Обработка команд и сообщений в Telegram-боте
 @bot.message_handler(commands=['start'])
 def welcome(message):
@@ -80,84 +94,20 @@ def unsubscribe(message):
     conn.commit()
     bot.send_message(user_id, "Ви відписалися від розсилки. Ви більше не будете отримувати новини.")
 
-@bot.message_handler(func=lambda msg: msg.text == "📬 Розсилка")
-def send_newsletter(message):
-    if message.chat.id == ADMIN_ID:
-        bot.send_message(ADMIN_ID, "Напишіть текст розсилки, який ви хочете відправити всім підписникам:")
-        admin_state[ADMIN_ID] = 'sending_newsletter'
+# Другие обработчики команд Telegram-бота...
 
-@bot.message_handler(func=lambda msg: admin_state.get(msg.chat.id) == 'sending_newsletter')
-def handle_newsletter(message):
-    if message.chat.id == ADMIN_ID:
-        newsletter_text = message.text
-        cursor.execute('SELECT user_id FROM subscribers')
-        subscribers = cursor.fetchall()
+# Запуск Flask сервера в отдельном потоке
+def run_flask():
+    app.run(host='0.0.0.0', port=int(os.environ.get('PORT', 5000)))
 
-        for subscriber in subscribers:
-            user_id = subscriber[0]
-            try:
-                bot.send_message(user_id, newsletter_text)
-            except Exception as e:
-                print(f"Не удалось отправить сообщение пользователю {user_id}: {e}")
-
-        bot.send_message(ADMIN_ID, "Розсилка була відправлена всім підписникам.")
-        admin_state[ADMIN_ID] = None
-
-@bot.message_handler(func=lambda message: True)
-def handle_text(message):
-    user_id = message.chat.id
-    text = message.text
-
-    cursor.execute('SELECT * FROM users WHERE id = ?', (user_id,))
-    user = cursor.fetchone()
-
-    if user and user[2] == 'ordering_cosmetics':
-        cursor.execute('INSERT INTO appointments (user_id, username, requested_time, status) VALUES (?, ?, ?, ?)',
-                       (user_id, message.from_user.username, text, 'pending'))
-        conn.commit()
-        cursor.execute('UPDATE users SET action = ? WHERE id = ?', (None, user_id))
-        conn.commit()
-        bot.send_message(user_id, "Дякуємо за вашу заявку! Адміністратор зв'яжеться з вами найближчим часом.")
-        bot.send_message(ADMIN_ID,
-                         f"🧴 Нова заявка на покупку косметики:\nКористувач: @{message.from_user.username}\nЗапит: {text}\nКонтакти: @{message.from_user.username}")
-
-@bot.message_handler(commands=['pdecline'])
-def decline_appointment(message):
-    if message.chat.id != ADMIN_ID:
-        return
-    try:
-        parts = message.text.split()
-        user_id = int(parts[1])
-        reason = ' '.join(parts[2:]) or 'Без причини'
-        cursor.execute('UPDATE appointments SET status = ?, reason = ? WHERE user_id = ? AND status = ?',
-                       ('declined', reason, user_id, 'pending'))
-        conn.commit()
-        bot.send_message(user_id, f"❌ Ваша заявка відхилена. Причина: {reason}")
-        bot.send_message(ADMIN_ID, "Заявку відхилено.")
-    except Exception as e:
-        bot.send_message(ADMIN_ID, f"Помилка: {e}")
-
-@bot.message_handler(commands=['pconfirm'])
-def confirm_appointment(message):
-    if message.chat.id != ADMIN_ID:
-        return
-    try:
-        parts = message.text.split()
-        user_id = int(parts[1])
-        cursor.execute('UPDATE appointments SET status = ? WHERE user_id = ? AND status = ?',
-                       ('confirmed', user_id, 'pending'))
-        conn.commit()
-        bot.send_message(user_id, "✅ Ваша заявка підтверджена! Очікуйте на консультацію.")
-        bot.send_message(ADMIN_ID, f"Заявка користувача @{user_id} підтверджена.")
-    except Exception as e:
-        bot.send_message(ADMIN_ID, f"Помилка: {e}")
-
-# Веб-хук или запуск Flask сервера (если нужно)
+# Запуск бота и Flask сервера
 if __name__ == '__main__':
-    # Определение порта из переменной окружения PORT
-    port = int(os.environ.get('PORT', 5000))
-    # Запуск Flask сервера для прослушивания порта
-    app.run(host='0.0.0.0', port=port)
+    # Настройка вебхука
+    set_webhook()
+
+    # Запуск Flask сервера в отдельном потоке
+    flask_thread = threading.Thread(target=run_flask)
+    flask_thread.start()
 
     # Запуск Telegram-бота
     bot.polling(none_stop=True)
