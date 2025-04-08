@@ -123,7 +123,6 @@ def decline_appointment(message):
         parts = message.text.split()
         user_id = int(parts[1])
         reason = ' '.join(parts[2:]) or 'Без причини'
-        # Обновляем статус заявки в базе данных
         cursor.execute('UPDATE appointments SET status = ?, reason = ? WHERE user_id = ? AND status = ?',
                        ('declined', reason, user_id, 'pending'))
         conn.commit()
