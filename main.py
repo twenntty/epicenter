@@ -3,7 +3,6 @@ import telebot
 from telebot import types
 from aiohttp import web
 import sqlite3
-import asyncio
 
 # Токен бота и ID администратора
 TOKEN = '7253772078:AAGI3pDm0Wc9CL3cIPCWTDpbqcmMnO7qV30'
@@ -45,6 +44,8 @@ async def handle(request):
     update = telebot.types.Update.de_json(json_str)
     bot.process_new_updates([update])
     return web.Response(text='OK')
+
+app.router.add_post(f'/{TOKEN}', handle)
 
 # Устанавливаем вебхук
 def set_webhook():
