@@ -2,21 +2,17 @@ import os
 import telebot
 from telebot import types
 import sqlite3
-from flask import Flask, request
-import threading
+import time
 
-# Настройки
 TOKEN = '7253772078:AAGI3pDm0Wc9CL3cIPCWTDpbqcmMnO7qV30'
 ADMIN_ID = 558372164
 
 bot = telebot.TeleBot(TOKEN)
 admin_state = {}
 
-# Создание подключения к базе данных
 conn = sqlite3.connect('database.db', check_same_thread=False)
 cursor = conn.cursor()
 
-# Создание таблиц в базе данных
 cursor.execute('''CREATE TABLE IF NOT EXISTS users (
                       id INTEGER PRIMARY KEY,
                       username TEXT,
@@ -36,27 +32,7 @@ cursor.execute('''CREATE TABLE IF NOT EXISTS subscribers (
                   )''')
 conn.commit()
 
-# Flask сервер для прослушивания порта
-app = Flask(__name__)
 
-@app.route('/')
-def webhook():
-    return "Telegram Bot is running!"
-
-@app.route(f'/{TOKEN}', methods=['POST'])
-def get_message():
-    json_str = request.get_data().decode('UTF-8')
-    update = telebot.types.Update.de_json(json_str)
-    bot.process_new_updates([update])
-    return 'OK', 200
-
-# Устанавливаем вебхук
-def set_webhook():
-    webhook_url = f'https://{os.environ["RENDER_EXTERNAL_URL"]}/{TOKEN}'
-    bot.remove_webhook()  # Удаляем старый вебхук
-    bot.set_webhook(url=webhook_url)  # Устанавливаем новый вебхук
-
-# Обработка команд и сообщений в Telegram-боте
 @bot.message_handler(commands=['start'])
 def welcome(message):
     user_id = message.chat.id
@@ -174,19 +150,5 @@ def confirm_appointment(message):
         bot.send_message(ADMIN_ID, f"Помилка: {e}")
 
 
-# Запуск Flask сервера в отдельном потоке
-def run_flask():
-    app.run(host='0.0.0.0', port=int(os.environ.get('PORT', 5000)))
-
-
-# Запуск бота и Flask сервера
-if __name__ == '__main__':
-    # Настройка вебхука
-    set_webhook()
-
-    # Запуск Flask сервера в отдельном потоке
-    flask_thread = threading.Thread(target=run_flask)
-    flask_thread.start()
-
-    # Запуск Telegram-бота
-    bot.polling(none_stop=True)
+print("Бот запущено..")
+bot.polling(none_stop=True)
