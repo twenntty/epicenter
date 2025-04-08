@@ -1,16 +1,21 @@
+import os
 import telebot
 from telebot import types
 import sqlite3
+from flask import Flask
 
+# Настройки
 TOKEN = '7253772078:AAGI3pDm0Wc9CL3cIPCWTDpbqcmMnO7qV30'
 ADMIN_ID = 558372164
 
 bot = telebot.TeleBot(TOKEN)
 admin_state = {}
 
+# Создание подключения к базе данных
 conn = sqlite3.connect('database.db', check_same_thread=False)
 cursor = conn.cursor()
 
+# Создание таблиц в базе данных
 cursor.execute('''CREATE TABLE IF NOT EXISTS users (
                       id INTEGER PRIMARY KEY,
                       username TEXT,
@@ -30,7 +35,14 @@ cursor.execute('''CREATE TABLE IF NOT EXISTS subscribers (
                   )''')
 conn.commit()
 
+# Flask сервер для прослушивания порта
+app = Flask(__name__)
 
+@app.route('/')
+def webhook():
+    return "Telegram Bot is running!"
+
+# Обработка команд и сообщений в Telegram-боте
 @bot.message_handler(commands=['start'])
 def welcome(message):
     user_id = message.chat.id
@@ -54,14 +66,12 @@ def welcome(message):
 
     bot.send_message(user_id, "Вітаю в боті Епіцентр! Оберіть дію:", reply_markup=markup)
 
-
 @bot.message_handler(func=lambda msg: msg.text == "🔔 Підписатися на розсилку")
 def subscribe(message):
     user_id = message.chat.id
     cursor.execute('INSERT OR REPLACE INTO subscribers (user_id) VALUES (?)', (user_id,))
     conn.commit()
     bot.send_message(user_id, "Ви підписалися на розсилку! Ви будете отримувати новини та оновлення.")
-
 
 @bot.message_handler(func=lambda msg: msg.text == "❌ Відписатися від розсилки")
 def unsubscribe(message):
@@ -70,13 +80,11 @@ def unsubscribe(message):
     conn.commit()
     bot.send_message(user_id, "Ви відписалися від розсилки. Ви більше не будете отримувати новини.")
 
-
 @bot.message_handler(func=lambda msg: msg.text == "📬 Розсилка")
 def send_newsletter(message):
     if message.chat.id == ADMIN_ID:
         bot.send_message(ADMIN_ID, "Напишіть текст розсилки, який ви хочете відправити всім підписникам:")
         admin_state[ADMIN_ID] = 'sending_newsletter'
-
 
 @bot.message_handler(func=lambda msg: admin_state.get(msg.chat.id) == 'sending_newsletter')
 def handle_newsletter(message):
@@ -94,7 +102,6 @@ def handle_newsletter(message):
 
         bot.send_message(ADMIN_ID, "Розсилка була відправлена всім підписникам.")
         admin_state[ADMIN_ID] = None
-
 
 @bot.message_handler(func=lambda message: True)
 def handle_text(message):
@@ -114,7 +121,6 @@ def handle_text(message):
         bot.send_message(ADMIN_ID,
                          f"🧴 Нова заявка на покупку косметики:\nКористувач: @{message.from_user.username}\nЗапит: {text}\nКонтакти: @{message.from_user.username}")
 
-
 @bot.message_handler(commands=['pdecline'])
 def decline_appointment(message):
     if message.chat.id != ADMIN_ID:
@@ -131,7 +137,6 @@ def decline_appointment(message):
     except Exception as e:
         bot.send_message(ADMIN_ID, f"Помилка: {e}")
 
-
 @bot.message_handler(commands=['pconfirm'])
 def confirm_appointment(message):
     if message.chat.id != ADMIN_ID:
@@ -147,6 +152,12 @@ def confirm_appointment(message):
     except Exception as e:
         bot.send_message(ADMIN_ID, f"Помилка: {e}")
 
+# Веб-хук или запуск Flask сервера (если нужно)
+if __name__ == '__main__':
+    # Определение порта из переменной окружения PORT
+    port = int(os.environ.get('PORT', 5000))
+    # Запуск Flask сервера для прослушивания порта
+    app.run(host='0.0.0.0', port=port)
 
-print("Бот запущено..")
-bot.polling(none_stop=True)
+    # Запуск Telegram-бота
+    bot.polling(none_stop=True)
