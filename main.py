@@ -164,7 +164,7 @@ def confirm_appointment(message):
 
 # Устанавливаем вебхук
 def set_webhook():
-    webhook_url = f'https://{os.environ["RENDER_EXTERNAL_URL"]}/{TOKEN}'
+    webhook_url = f'{os.environ["RENDER_EXTERNAL_URL"]}{TOKEN}'
     bot.remove_webhook()
     bot.set_webhook(url=webhook_url)
 
