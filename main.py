@@ -257,7 +257,7 @@ def confirm_appointment(message):
         bot.send_message(ADMIN_ID, f"Помилка: {e}")
 
 
-# Запуск приложения
+
 if __name__ == '__main__':
     set_webhook()
     web.run_app(app, host='0.0.0.0', port=int(os.environ.get('PORT', 5000)))
