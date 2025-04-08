@@ -148,5 +148,5 @@ def confirm_appointment(message):
         bot.send_message(ADMIN_ID, f"Помилка: {e}")
 
 
-print("Бот запущено...")
+print("Бот запущено..")
 bot.polling(none_stop=True)
