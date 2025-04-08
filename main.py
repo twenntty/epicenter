@@ -1,52 +1,64 @@
-import sqlite3
+import os
 import telebot
 from telebot import types
+from aiohttp import web
+import sqlite3
+import asyncio
 
+# Токен бота и ID администратора
 TOKEN = '7253772078:AAGI3pDm0Wc9CL3cIPCWTDpbqcmMnO7qV30'
 ADMIN_ID = 558372164
 
 bot = telebot.TeleBot(TOKEN)
 admin_state = {}
 
+# Создание подключения к базе данных SQLite
+conn = sqlite3.connect('database.db', check_same_thread=False)
+cursor = conn.cursor()
 
-# Создание подключения к базе данных
-def get_db_connection():
-    conn = sqlite3.connect('database.db', check_same_thread=False)
-    return conn
+# Создание таблиц в базе данных
+cursor.execute('''CREATE TABLE IF NOT EXISTS users (
+                      id INTEGER PRIMARY KEY,
+                      username TEXT,
+                      action TEXT
+                  )''')
 
+cursor.execute('''CREATE TABLE IF NOT EXISTS appointments (
+                      user_id INTEGER,
+                      username TEXT,
+                      requested_time TEXT,
+                      status TEXT,
+                      reason TEXT
+                  )''')
 
-# Создание таблиц в базе данных (если они ещё не существуют)
-with get_db_connection() as conn:
-    cursor = conn.cursor()
-    cursor.execute('''CREATE TABLE IF NOT EXISTS users (
-                          id INTEGER PRIMARY KEY,
-                          username TEXT,
-                          action TEXT
-                      )''')
+cursor.execute('''CREATE TABLE IF NOT EXISTS subscribers (
+                      user_id INTEGER PRIMARY KEY
+                  )''')
+conn.commit()
 
-    cursor.execute('''CREATE TABLE IF NOT EXISTS appointments (
-                          user_id INTEGER,
-                          username TEXT,
-                          requested_time TEXT,
-                          status TEXT,
-                          reason TEXT
-                      )''')
+# Создаем приложение aiohttp
+app = web.Application()
 
-    cursor.execute('''CREATE TABLE IF NOT EXISTS subscribers (
-                          user_id INTEGER PRIMARY KEY
-                      )''')
-    conn.commit()
+# Обработчик для получения вебхуков от Telegram
+async def handle(request):
+    json_str = await request.text()
+    update = telebot.types.Update.de_json(json_str)
+    bot.process_new_updates([update])
+    return web.Response(text='OK')
 
+# Устанавливаем вебхук
+def set_webhook():
+    webhook_url = f'https://{os.environ["RENDER_EXTERNAL_URL"]}/{TOKEN}'
+    bot.remove_webhook()
+    bot.set_webhook(url=webhook_url)
 
+# Обработка команд и сообщений в Telegram-боте
 @bot.message_handler(commands=['start'])
 def welcome(message):
     user_id = message.chat.id
     username = message.from_user.username
-
-    with get_db_connection() as conn:
-        cursor = conn.cursor()
-        cursor.execute('INSERT OR REPLACE INTO users (id, username) VALUES (?, ?)', (user_id, username))
-        conn.commit()
+    cursor.execute('INSERT OR REPLACE INTO users (id, username) VALUES (?, ?)', (user_id, username))
+    conn.commit()
 
     markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
     btn1 = types.KeyboardButton("🧴 Замовити косметику")
@@ -64,26 +76,19 @@ def welcome(message):
 
     bot.send_message(user_id, "Вітаю в боті Епіцентр! Оберіть дію:", reply_markup=markup)
 
-
 @bot.message_handler(func=lambda msg: msg.text == "🔔 Підписатися на розсилку")
 def subscribe(message):
     user_id = message.chat.id
-    with get_db_connection() as conn:
-        cursor = conn.cursor()
-        cursor.execute('INSERT OR REPLACE INTO subscribers (user_id) VALUES (?)', (user_id,))
-        conn.commit()
+    cursor.execute('INSERT OR REPLACE INTO subscribers (user_id) VALUES (?)', (user_id,))
+    conn.commit()
     bot.send_message(user_id, "Ви підписалися на розсилку! Ви будете отримувати новини та оновлення.")
-
 
 @bot.message_handler(func=lambda msg: msg.text == "❌ Відписатися від розсилки")
 def unsubscribe(message):
     user_id = message.chat.id
-    with get_db_connection() as conn:
-        cursor = conn.cursor()
-        cursor.execute('DELETE FROM subscribers WHERE user_id = ?', (user_id,))
-        conn.commit()
+    cursor.execute('DELETE FROM subscribers WHERE user_id = ?', (user_id,))
+    conn.commit()
     bot.send_message(user_id, "Ви відписалися від розсилки. Ви більше не будете отримувати новини.")
-
 
 @bot.message_handler(func=lambda msg: msg.text == "📬 Розсилка")
 def send_newsletter(message):
@@ -91,15 +96,12 @@ def send_newsletter(message):
         bot.send_message(ADMIN_ID, "Напишіть текст розсилки, який ви хочете відправити всім підписникам:")
         admin_state[ADMIN_ID] = 'sending_newsletter'
 
-
 @bot.message_handler(func=lambda msg: admin_state.get(msg.chat.id) == 'sending_newsletter')
 def handle_newsletter(message):
     if message.chat.id == ADMIN_ID:
         newsletter_text = message.text
-        with get_db_connection() as conn:
-            cursor = conn.cursor()
-            cursor.execute('SELECT user_id FROM subscribers')
-            subscribers = cursor.fetchall()
+        cursor.execute('SELECT user_id FROM subscribers')
+        subscribers = cursor.fetchall()
 
         for subscriber in subscribers:
             user_id = subscriber[0]
@@ -111,33 +113,23 @@ def handle_newsletter(message):
         bot.send_message(ADMIN_ID, "Розсилка була відправлена всім підписникам.")
         admin_state[ADMIN_ID] = None
 
-
 @bot.message_handler(func=lambda message: True)
 def handle_text(message):
     user_id = message.chat.id
     text = message.text
 
-    with get_db_connection() as conn:
-        cursor = conn.cursor()
-        cursor.execute('SELECT * FROM users WHERE id = ?', (user_id,))
-        user = cursor.fetchone()
+    cursor.execute('SELECT * FROM users WHERE id = ?', (user_id,))
+    user = cursor.fetchone()
 
     if user and user[2] == 'ordering_cosmetics':
-        with get_db_connection() as conn:
-            cursor = conn.cursor()
-            cursor.execute('INSERT INTO appointments (user_id, username, requested_time, status) VALUES (?, ?, ?, ?)',
-                           (user_id, message.from_user.username, text, 'pending'))
-            conn.commit()
-
-        with get_db_connection() as conn:
-            cursor = conn.cursor()
-            cursor.execute('UPDATE users SET action = ? WHERE id = ?', (None, user_id))
-            conn.commit()
-
+        cursor.execute('INSERT INTO appointments (user_id, username, requested_time, status) VALUES (?, ?, ?, ?)',
+                       (user_id, message.from_user.username, text, 'pending'))
+        conn.commit()
+        cursor.execute('UPDATE users SET action = ? WHERE id = ?', (None, user_id))
+        conn.commit()
         bot.send_message(user_id, "Дякуємо за вашу заявку! Адміністратор зв'яжеться з вами найближчим часом.")
         bot.send_message(ADMIN_ID,
                          f"🧴 Нова заявка на покупку косметики:\nКористувач: @{message.from_user.username}\nЗапит: {text}\nКонтакти: @{message.from_user.username}")
-
 
 @bot.message_handler(commands=['pdecline'])
 def decline_appointment(message):
@@ -147,17 +139,13 @@ def decline_appointment(message):
         parts = message.text.split()
         user_id = int(parts[1])
         reason = ' '.join(parts[2:]) or 'Без причини'
-        with get_db_connection() as conn:
-            cursor = conn.cursor()
-            cursor.execute('UPDATE appointments SET status = ?, reason = ? WHERE user_id = ? AND status = ?',
-                           ('declined', reason, user_id, 'pending'))
-            conn.commit()
-
+        cursor.execute('UPDATE appointments SET status = ?, reason = ? WHERE user_id = ? AND status = ?',
+                       ('declined', reason, user_id, 'pending'))
+        conn.commit()
         bot.send_message(user_id, f"❌ Ваша заявка відхилена. Причина: {reason}")
         bot.send_message(ADMIN_ID, "Заявку відхилено.")
     except Exception as e:
         bot.send_message(ADMIN_ID, f"Помилка: {e}")
-
 
 @bot.message_handler(commands=['pconfirm'])
 def confirm_appointment(message):
@@ -166,17 +154,24 @@ def confirm_appointment(message):
     try:
         parts = message.text.split()
         user_id = int(parts[1])
-        with get_db_connection() as conn:
-            cursor = conn.cursor()
-            cursor.execute('UPDATE appointments SET status = ? WHERE user_id = ? AND status = ?',
-                           ('confirmed', user_id, 'pending'))
-            conn.commit()
-
+        cursor.execute('UPDATE appointments SET status = ? WHERE user_id = ? AND status = ?',
+                       ('confirmed', user_id, 'pending'))
+        conn.commit()
         bot.send_message(user_id, "✅ Ваша заявка підтверджена! Очікуйте на консультацію.")
         bot.send_message(ADMIN_ID, f"Заявка користувача @{user_id} підтверджена.")
     except Exception as e:
         bot.send_message(ADMIN_ID, f"Помилка: {e}")
 
+# Устанавливаем вебхук
+def set_webhook():
+    webhook_url = f'https://{os.environ["RENDER_EXTERNAL_URL"]}/{TOKEN}'
+    bot.remove_webhook()
+    bot.set_webhook(url=webhook_url)
 
-print("Бот запущено..")
-bot.polling(none_stop=True)
+# Запуск aiohttp
+if __name__ == '__main__':
+    # Настройка вебхука
+    set_webhook()
+
+    # Запуск веб-сервера
+    web.run_app(app, host='0.0.0.0', port=int(os.environ.get('PORT', 5000)))
